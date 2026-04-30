@@ -22,7 +22,6 @@ export default function Home() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [loading,    setLoading]    = useState(true);
 
-  // All articles for the same country as the selected one, newest-first
   const countryArticles = useMemo(() => {
     if (!selected) return [];
     return articles
@@ -52,12 +51,10 @@ export default function Home() {
   return (
     <main className="relative w-full h-screen bg-black overflow-hidden">
 
-      {/* Globe fills the whole screen — must be behind everything, no pointer-events wrappers */}
       <div className="absolute inset-0">
         <GlobeMap articles={articles} onArticleClick={setSelected} />
       </div>
 
-      {/* Subtitle bar — sits below the fixed NavBar */}
       <div className="absolute top-14 left-1/2 -translate-x-1/2 z-10 text-center pointer-events-none">
         {lastUpdate && (
           <p className="text-xs text-zinc-600">
@@ -67,7 +64,6 @@ export default function Home() {
         )}
       </div>
 
-      {/* Loading overlay */}
       {loading && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black">
           <div className="text-center">
@@ -77,17 +73,15 @@ export default function Home() {
         </div>
       )}
 
-      {/* News panel — shows all articles for the selected country */}
       <NewsPanel
         articles={countryArticles}
         selectedId={selected?.id ?? null}
         onClose={() => setSelected(null)}
       />
 
-      {/* Refresh button */}
       <button
         onClick={fetchNews}
-        className="absolute top-4 right-4 z-10 p-2 rounded-md
+        className="absolute top-14 right-4 z-10 p-2 rounded-md
           bg-zinc-900/80 border border-zinc-700 text-zinc-400
           hover:text-zinc-200 hover:border-zinc-500 transition-all backdrop-blur-sm"
         title="Refresh news"
