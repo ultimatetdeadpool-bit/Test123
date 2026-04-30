@@ -8,3 +8,6 @@ Thumbs.db
 
 # Claude memory (local only)
 .claude/
+
+# Node (root level, if any)
+node_modules/
