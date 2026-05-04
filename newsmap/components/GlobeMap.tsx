@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { NewsArticle } from "@/lib/types";
+import type { LocalNewsSource } from "@/lib/local-news-sources";
 
 const CATEGORY_COLORS: Record<string, string> = {
   politics:    "#ef4444",
@@ -15,10 +16,11 @@ const CATEGORY_COLORS: Record<string, string> = {
 interface GlobeMapProps {
   articles: NewsArticle[];
   onArticleClick: (article: NewsArticle) => void;
+  localSources?: LocalNewsSource[];
+  onLocalSourceClick?: (sourceId: string) => void;
 }
 
-// Generate a radial-gradient canvas texture for a glowing orb of a given color.
-// Returns a data URL so Cesium can use it as a billboard image.
+// Radial-gradient canvas texture for a glowing orb (category dots)
 const glowCache = new Map<string, string>();
 function makeGlowDataUrl(hex: string): string {
   if (glowCache.has(hex)) return glowCache.get(hex)!;
@@ -33,12 +35,12 @@ function makeGlowDataUrl(hex: string): string {
   const b = parseInt(hex.slice(5, 7), 16);
 
   const grad = ctx.createRadialGradient(c, c, 0, c, c, c);
-  grad.addColorStop(0,    `rgba(255,255,255,1)`);         // white-hot center
-  grad.addColorStop(0.08, `rgba(255,255,255,0.9)`);       // still bright
-  grad.addColorStop(0.18, `rgba(${r},${g},${b},1)`);     // pure category color
-  grad.addColorStop(0.4,  `rgba(${r},${g},${b},0.5)`);   // mid glow
-  grad.addColorStop(0.7,  `rgba(${r},${g},${b},0.12)`);  // soft outer halo
-  grad.addColorStop(1,    `rgba(${r},${g},${b},0)`);     // transparent edge
+  grad.addColorStop(0,    `rgba(255,255,255,1)`);
+  grad.addColorStop(0.08, `rgba(255,255,255,0.9)`);
+  grad.addColorStop(0.18, `rgba(${r},${g},${b},1)`);
+  grad.addColorStop(0.4,  `rgba(${r},${g},${b},0.5)`);
+  grad.addColorStop(0.7,  `rgba(${r},${g},${b},0.12)`);
+  grad.addColorStop(1,    `rgba(${r},${g},${b},0)`);
 
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, size, size);
@@ -48,19 +50,79 @@ function makeGlowDataUrl(hex: string): string {
   return url;
 }
 
-export default function GlobeMap({ articles, onArticleClick }: GlobeMapProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const viewerRef    = useRef<unknown>(null);
-  const articlesRef  = useRef<NewsArticle[]>(articles);
-  const onClickRef   = useRef(onArticleClick);
-  const entityMap    = useRef<Map<string, NewsArticle>>(new Map());
-  const [is3D,       setIs3D]    = useState(true);
-  const [morphing,   setMorphing] = useState(false);
+// Concentric-ring "beacon" texture for local news source markers
+const beaconCache = new Map<string, string>();
+function makeBeaconDataUrl(hex: string): string {
+  if (beaconCache.has(hex)) return beaconCache.get(hex)!;
+  const size = 128;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d")!;
+  const c = size / 2;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+
+  // Outer ring
+  ctx.beginPath();
+  ctx.arc(c, c, 50, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(${r},${g},${b},0.25)`;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Middle ring
+  ctx.beginPath();
+  ctx.arc(c, c, 34, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(${r},${g},${b},0.55)`;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Inner ring
+  ctx.beginPath();
+  ctx.arc(c, c, 18, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(${r},${g},${b},0.9)`;
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // Center: white core fading to color
+  const grad = ctx.createRadialGradient(c, c, 0, c, c, 10);
+  grad.addColorStop(0,   `rgba(255,255,255,1)`);
+  grad.addColorStop(0.4, `rgba(${r},${g},${b},1)`);
+  grad.addColorStop(1,   `rgba(${r},${g},${b},0)`);
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(c, c, 10, 0, Math.PI * 2);
+  ctx.fill();
+
+  const url = canvas.toDataURL();
+  beaconCache.set(hex, url);
+  return url;
+}
+
+export default function GlobeMap({
+  articles,
+  onArticleClick,
+  localSources = [],
+  onLocalSourceClick,
+}: GlobeMapProps) {
+  const containerRef        = useRef<HTMLDivElement>(null);
+  const viewerRef           = useRef<unknown>(null);
+  const articlesRef         = useRef<NewsArticle[]>(articles);
+  const localSourcesRef     = useRef<LocalNewsSource[]>(localSources);
+  const onClickRef          = useRef(onArticleClick);
+  const onLocalClickRef     = useRef(onLocalSourceClick);
+  const entityMap           = useRef<Map<string, NewsArticle>>(new Map());
+  const localSourceMap      = useRef<Map<string, string>>(new Map()); // entityId → sourceId
+  const [is3D,      setIs3D]      = useState(true);
+  const [morphing,  setMorphing]  = useState(false);
   const [drawVersion, setDrawVersion] = useState(0);
 
-  useEffect(() => { articlesRef.current = articles; },      [articles]);
-  useEffect(() => { onClickRef.current  = onArticleClick; }, [onArticleClick]);
-  useEffect(() => { setDrawVersion(v => v + 1); },          [articles]);
+  useEffect(() => { articlesRef.current    = articles;       }, [articles]);
+  useEffect(() => { localSourcesRef.current = localSources;  }, [localSources]);
+  useEffect(() => { onClickRef.current      = onArticleClick; }, [onArticleClick]);
+  useEffect(() => { onLocalClickRef.current = onLocalSourceClick; }, [onLocalSourceClick]);
+  useEffect(() => { setDrawVersion(v => v + 1); }, [articles]);
 
   // ── Cesium init ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -76,13 +138,12 @@ export default function GlobeMap({ articles, onArticleClick }: GlobeMapProps) {
       Cesium.Ion.defaultAccessToken =
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholder";
 
-      const stadiaKey = process.env.NEXT_PUBLIC_STADIA_KEY;
-      const tileUrl   = stadiaKey
-        ? `https://tiles.stadiamaps.com/tiles/stamen_toner/{z}/{x}/{y}.png?api_key=${stadiaKey}`
-        : "https://stamen-tiles.a.ssl.fastly.net/toner/{z}/{x}/{y}.png";
-
       const baseLayer = Cesium.ImageryLayer.fromProviderAsync(
-        Promise.resolve(new Cesium.UrlTemplateImageryProvider({ url: tileUrl }))
+        Promise.resolve(new Cesium.UrlTemplateImageryProvider({
+          url:          "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+          subdomains:   ["a", "b", "c", "d"],
+          maximumLevel: 18,
+        }))
       );
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -112,8 +173,11 @@ export default function GlobeMap({ articles, onArticleClick }: GlobeMapProps) {
         (click: { position: unknown }) => {
           const picked = viewer.scene.pick(click.position);
           if (picked?.id?.id) {
-            const article = entityMap.current.get(picked.id.id);
-            if (article) onClickRef.current(article);
+            const id = picked.id.id as string;
+            const article = entityMap.current.get(id);
+            if (article) { onClickRef.current(article); return; }
+            const sourceId = localSourceMap.current.get(id);
+            if (sourceId) onLocalClickRef.current?.(sourceId);
           }
         },
         Cesium.ScreenSpaceEventType.LEFT_CLICK
@@ -147,12 +211,12 @@ export default function GlobeMap({ articles, onArticleClick }: GlobeMapProps) {
 
     viewer.entities.removeAll();
     entityMap.current.clear();
+    localSourceMap.current.clear();
 
+    // Article dots
     for (const article of articlesRef.current) {
       const hex   = CATEGORY_COLORS[article.category] ?? "#3b82f6";
       const image = makeGlowDataUrl(hex);
-
-      // Each dot gets its own pulse phase & speed so they don't throb in sync
       const phase = Math.random() * Math.PI * 2;
       const speed = 0.6 + Math.random() * 0.8;
 
@@ -162,19 +226,42 @@ export default function GlobeMap({ articles, onArticleClick }: GlobeMapProps) {
           image,
           width:  32,
           height: 32,
-          // CallbackProperty is evaluated every frame by Cesium's render loop
           scale: new C.CallbackProperty(() => {
             const t = Date.now() / 1000;
             return 1.0 + 0.2 * Math.sin(t * speed + phase);
           }, false),
           verticalOrigin:   C.VerticalOrigin.CENTER,
           horizontalOrigin: C.HorizontalOrigin.CENTER,
-          // Always render on top — no z-fighting with the globe surface
           eyeOffset: new C.Cartesian3(0, 0, -2000),
         },
       });
 
       entityMap.current.set(entity.id, article);
+    }
+
+    // Local news source beacons — drawn on top with a stronger eyeOffset
+    for (const source of localSourcesRef.current) {
+      const image = makeBeaconDataUrl(source.color);
+      const phase = Math.random() * Math.PI * 2;
+
+      const entity = viewer.entities.add({
+        position: C.Cartesian3.fromDegrees(source.lon, source.lat),
+        billboard: {
+          image,
+          width:  48,
+          height: 48,
+          // Slower, wider pulse to feel different from article dots
+          scale: new C.CallbackProperty(() => {
+            const t = Date.now() / 1000;
+            return 1.0 + 0.15 * Math.sin(t * 0.8 + phase);
+          }, false),
+          verticalOrigin:   C.VerticalOrigin.CENTER,
+          horizontalOrigin: C.HorizontalOrigin.CENTER,
+          eyeOffset: new C.Cartesian3(0, 0, -1000),
+        },
+      });
+
+      localSourceMap.current.set(entity.id, source.id);
     }
   }, []);
 
@@ -225,6 +312,25 @@ export default function GlobeMap({ articles, onArticleClick }: GlobeMapProps) {
               <span className="text-xs text-zinc-300 capitalize">{cat}</span>
             </div>
           ))}
+
+          {localSources.length > 0 && (
+            <>
+              <div className="border-t border-zinc-700 my-1" />
+              <p className="text-xs text-zinc-400 font-medium uppercase tracking-wide mb-1">Local sources</p>
+              {localSources.map(src => (
+                <div key={src.id} className="flex items-center gap-2">
+                  <div
+                    className="w-3 h-3 rounded-full flex-shrink-0 ring-1"
+                    style={{
+                      background: src.color,
+                      boxShadow:  `0 0 6px 2px ${src.color}`,
+                    }}
+                  />
+                  <span className="text-xs text-zinc-300">{src.region}</span>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       </div>
     </div>

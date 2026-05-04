@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import NewsPanel from "@/components/NewsPanel";
 import type { NewsArticle } from "@/lib/types";
+import { LOCAL_NEWS_SOURCES } from "@/lib/local-news-sources";
 
 const GlobeMap = dynamic(() => import("@/components/GlobeMap"), {
   ssr: false,
@@ -17,10 +18,12 @@ const GlobeMap = dynamic(() => import("@/components/GlobeMap"), {
 const REFRESH_INTERVAL = 5 * 60 * 1000;
 
 export default function Home() {
-  const [articles,   setArticles]   = useState<NewsArticle[]>([]);
-  const [selected,   setSelected]   = useState<NewsArticle | null>(null);
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-  const [loading,    setLoading]    = useState(true);
+  const [articles,        setArticles]        = useState<NewsArticle[]>([]);
+  const [selected,        setSelected]        = useState<NewsArticle | null>(null);
+  const [lastUpdate,      setLastUpdate]      = useState<Date | null>(null);
+  const [loading,         setLoading]         = useState(true);
+  const [localArticles,   setLocalArticles]   = useState<Record<string, NewsArticle[]>>({});
+  const [activeSourceId,  setActiveSourceId]  = useState<string | null>(null);
 
   const countryArticles = useMemo(() => {
     if (!selected) return [];
@@ -42,17 +45,55 @@ export default function Home() {
     }
   }, []);
 
+  const fetchLocalNews = useCallback(async () => {
+    const results: Record<string, NewsArticle[]> = {};
+    await Promise.allSettled(
+      LOCAL_NEWS_SOURCES.map(async (src) => {
+        try {
+          const res = await fetch(src.apiPath);
+          const data = await res.json();
+          results[src.id] = data.articles ?? [];
+        } catch {
+          results[src.id] = [];
+        }
+      })
+    );
+    setLocalArticles(results);
+  }, []);
+
   useEffect(() => {
     fetchNews();
+    fetchLocalNews();
     const interval = setInterval(fetchNews, REFRESH_INTERVAL);
     return () => clearInterval(interval);
-  }, [fetchNews]);
+  }, [fetchNews, fetchLocalNews]);
+
+  // Selecting an article clears any open local-source panel
+  useEffect(() => {
+    if (selected !== null) setActiveSourceId(null);
+  }, [selected]);
+
+  const handleLocalSourceClick = useCallback((sourceId: string) => {
+    setSelected(null);
+    setActiveSourceId(prev => (prev === sourceId ? null : sourceId));
+  }, []);
+
+  const activeSource = LOCAL_NEWS_SOURCES.find(s => s.id === activeSourceId);
+  const panelArticles = activeSourceId
+    ? (localArticles[activeSourceId] ?? [])
+    : countryArticles;
+  const panelOpen = activeSourceId !== null || selected !== null;
 
   return (
     <main className="relative w-full h-screen bg-black overflow-hidden">
 
       <div className="absolute inset-0">
-        <GlobeMap articles={articles} onArticleClick={setSelected} />
+        <GlobeMap
+          articles={articles}
+          onArticleClick={setSelected}
+          localSources={LOCAL_NEWS_SOURCES}
+          onLocalSourceClick={handleLocalSourceClick}
+        />
       </div>
 
       <div className="absolute top-14 left-1/2 -translate-x-1/2 z-10 text-center pointer-events-none">
@@ -74,9 +115,13 @@ export default function Home() {
       )}
 
       <NewsPanel
-        articles={countryArticles}
+        articles={panelArticles}
         selectedId={selected?.id ?? null}
-        onClose={() => setSelected(null)}
+        onClose={() => {
+          setSelected(null);
+          setActiveSourceId(null);
+        }}
+        title={activeSource ? activeSource.name : undefined}
       />
 
       <button

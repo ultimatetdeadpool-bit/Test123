@@ -16,14 +16,15 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 interface NewsPanelProps {
-  articles: NewsArticle[];   // all articles for the country, newest-first
-  selectedId: string | null; // the clicked / highlighted one
+  articles: NewsArticle[];
+  selectedId: string | null;
   onClose: () => void;
+  title?: string;
 }
 
-export default function NewsPanel({ articles, selectedId, onClose }: NewsPanelProps) {
-  const country  = articles[0]?.country ?? null;
-  const isOpen   = articles.length > 0;
+export default function NewsPanel({ articles, selectedId, onClose, title }: NewsPanelProps) {
+  const country  = title ?? articles[0]?.country ?? null;
+  const isOpen   = articles.length > 0 || !!title;
   const itemRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   // Escape key to close
@@ -45,7 +46,7 @@ export default function NewsPanel({ articles, selectedId, onClose }: NewsPanelPr
     <AnimatePresence>
       {isOpen && (
         <motion.div
-          key={country}
+          key={title ?? country}
           initial={{ x: "100%", opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
           exit={{ x: "100%", opacity: 0 }}
@@ -72,6 +73,15 @@ export default function NewsPanel({ articles, selectedId, onClose }: NewsPanelPr
 
           {/* Scrollable article list */}
           <div className="flex-1 overflow-y-auto">
+            {articles.length === 0 && (
+              <div className="flex flex-col items-center justify-center h-40 gap-2 text-zinc-600">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                    d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10l6 6v8a2 2 0 01-2 2z" />
+                </svg>
+                <p className="text-xs">No articles found</p>
+              </div>
+            )}
             {articles.map((article) => {
               const isSelected = article.id === selectedId;
               const color = CATEGORY_COLORS[article.category] ?? "#e2e8f0";
