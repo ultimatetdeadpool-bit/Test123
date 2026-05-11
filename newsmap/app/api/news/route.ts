@@ -86,8 +86,8 @@ export async function GET() {
           url,
           category,
           country: coords.name,
-          lat: coords.lat + (Math.random() - 0.5) * 2,
-          lon: coords.lon + (Math.random() - 0.5) * 2,
+          lat: coords.lat,
+          lon: coords.lon,
           publishedAt: pubDate?.toISOString() ?? new Date().toISOString(),
         });
       }

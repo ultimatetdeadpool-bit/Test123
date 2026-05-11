@@ -3,54 +3,78 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { NewsArticle } from "@/lib/types";
 import type { LocalNewsSource } from "@/lib/local-news-sources";
-
-const CATEGORY_COLORS: Record<string, string> = {
-  politics:    "#ef4444",
-  economy:     "#f59e0b",
-  environment: "#22c55e",
-  health:      "#a855f7",
-  technology:  "#06b6d4",
-  general:     "#3b82f6",
-};
+import { CATEGORY_COLORS } from "@/lib/category-colors";
 
 interface GlobeMapProps {
   articles: NewsArticle[];
-  onArticleClick: (article: NewsArticle) => void;
+  onCountryClick: (country: string) => void;
   localSources?: LocalNewsSource[];
   onLocalSourceClick?: (sourceId: string) => void;
 }
 
-// Radial-gradient canvas texture for a glowing orb (category dots)
-const glowCache = new Map<string, string>();
-function makeGlowDataUrl(hex: string): string {
-  if (glowCache.has(hex)) return glowCache.get(hex)!;
+// Donut-chart canvas texture — one per unique category breakdown
+const donutCache = new Map<string, string>();
+function makeDonutDataUrl(segments: { color: string; count: number }[], total: number): string {
+  const key = segments.map(s => `${s.color}:${s.count}`).join(",");
+  if (donutCache.has(key)) return donutCache.get(key)!;
+
   const size = 128;
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext("2d")!;
   const c = size / 2;
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
+  const outerR = 50;
+  const innerR = 22;
+  const GAP = segments.length > 1 ? 0.05 : 0; // radians gap between slices
 
-  const grad = ctx.createRadialGradient(c, c, 0, c, c, c);
-  grad.addColorStop(0,    `rgba(255,255,255,1)`);
-  grad.addColorStop(0.08, `rgba(255,255,255,0.9)`);
-  grad.addColorStop(0.18, `rgba(${r},${g},${b},1)`);
-  grad.addColorStop(0.4,  `rgba(${r},${g},${b},0.5)`);
-  grad.addColorStop(0.7,  `rgba(${r},${g},${b},0.12)`);
-  grad.addColorStop(1,    `rgba(${r},${g},${b},0)`);
+  // Dominant segment drives the glow color
+  const dominant = segments.reduce((a, b) => (a.count >= b.count ? a : b));
+  const dr = parseInt(dominant.color.slice(1, 3), 16);
+  const dg = parseInt(dominant.color.slice(3, 5), 16);
+  const db = parseInt(dominant.color.slice(5, 7), 16);
 
-  ctx.fillStyle = grad;
+  // Outer glow
+  const glow = ctx.createRadialGradient(c, c, innerR, c, c, c);
+  glow.addColorStop(0,   `rgba(${dr},${dg},${db},0.40)`);
+  glow.addColorStop(0.5, `rgba(${dr},${dg},${db},0.12)`);
+  glow.addColorStop(1,   `rgba(${dr},${dg},${db},0)`);
+  ctx.fillStyle = glow;
   ctx.fillRect(0, 0, size, size);
 
+  // Donut slices
+  let startAngle = -Math.PI / 2;
+  for (const seg of segments) {
+    if (seg.count === 0) continue;
+    const sweep = (seg.count / total) * Math.PI * 2 - GAP;
+    if (sweep <= 0) { startAngle += GAP; continue; }
+
+    ctx.beginPath();
+    ctx.arc(c, c, outerR, startAngle, startAngle + sweep);
+    ctx.arc(c, c, innerR, startAngle + sweep, startAngle, true);
+    ctx.closePath();
+    ctx.fillStyle = seg.color;
+    ctx.fill();
+
+    startAngle += sweep + GAP;
+  }
+
+  // White inner glow (donut hole)
+  const hole = ctx.createRadialGradient(c, c, 0, c, c, innerR);
+  hole.addColorStop(0,   "rgba(255,255,255,0.95)");
+  hole.addColorStop(0.35,"rgba(255,255,255,0.50)");
+  hole.addColorStop(1,   "rgba(255,255,255,0)");
+  ctx.fillStyle = hole;
+  ctx.beginPath();
+  ctx.arc(c, c, innerR, 0, Math.PI * 2);
+  ctx.fill();
+
   const url = canvas.toDataURL();
-  glowCache.set(hex, url);
+  donutCache.set(key, url);
   return url;
 }
 
-// Concentric-ring "beacon" texture for local news source markers
+// Concentric-ring beacon texture for local news sources
 const beaconCache = new Map<string, string>();
 function makeBeaconDataUrl(hex: string): string {
   if (beaconCache.has(hex)) return beaconCache.get(hex)!;
@@ -64,30 +88,26 @@ function makeBeaconDataUrl(hex: string): string {
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
 
-  // Outer ring
   ctx.beginPath();
   ctx.arc(c, c, 50, 0, Math.PI * 2);
   ctx.strokeStyle = `rgba(${r},${g},${b},0.25)`;
   ctx.lineWidth = 2;
   ctx.stroke();
 
-  // Middle ring
   ctx.beginPath();
   ctx.arc(c, c, 34, 0, Math.PI * 2);
   ctx.strokeStyle = `rgba(${r},${g},${b},0.55)`;
   ctx.lineWidth = 2;
   ctx.stroke();
 
-  // Inner ring
   ctx.beginPath();
   ctx.arc(c, c, 18, 0, Math.PI * 2);
   ctx.strokeStyle = `rgba(${r},${g},${b},0.9)`;
   ctx.lineWidth = 2.5;
   ctx.stroke();
 
-  // Center: white core fading to color
   const grad = ctx.createRadialGradient(c, c, 0, c, c, 10);
-  grad.addColorStop(0,   `rgba(255,255,255,1)`);
+  grad.addColorStop(0,   "rgba(255,255,255,1)");
   grad.addColorStop(0.4, `rgba(${r},${g},${b},1)`);
   grad.addColorStop(1,   `rgba(${r},${g},${b},0)`);
   ctx.fillStyle = grad;
@@ -102,25 +122,25 @@ function makeBeaconDataUrl(hex: string): string {
 
 export default function GlobeMap({
   articles,
-  onArticleClick,
+  onCountryClick,
   localSources = [],
   onLocalSourceClick,
 }: GlobeMapProps) {
-  const containerRef        = useRef<HTMLDivElement>(null);
-  const viewerRef           = useRef<unknown>(null);
-  const articlesRef         = useRef<NewsArticle[]>(articles);
-  const localSourcesRef     = useRef<LocalNewsSource[]>(localSources);
-  const onClickRef          = useRef(onArticleClick);
-  const onLocalClickRef     = useRef(onLocalSourceClick);
-  const entityMap           = useRef<Map<string, NewsArticle>>(new Map());
-  const localSourceMap      = useRef<Map<string, string>>(new Map()); // entityId → sourceId
-  const [is3D,      setIs3D]      = useState(true);
-  const [morphing,  setMorphing]  = useState(false);
+  const containerRef       = useRef<HTMLDivElement>(null);
+  const viewerRef          = useRef<unknown>(null);
+  const articlesRef        = useRef<NewsArticle[]>(articles);
+  const localSourcesRef    = useRef<LocalNewsSource[]>(localSources);
+  const onCountryClickRef  = useRef(onCountryClick);
+  const onLocalClickRef    = useRef(onLocalSourceClick);
+  const countryMap         = useRef<Map<string, string>>(new Map()); // entityId → country name
+  const localSourceMap     = useRef<Map<string, string>>(new Map()); // entityId → sourceId
+  const [is3D,     setIs3D]     = useState(true);
+  const [morphing, setMorphing] = useState(false);
   const [drawVersion, setDrawVersion] = useState(0);
 
-  useEffect(() => { articlesRef.current    = articles;       }, [articles]);
-  useEffect(() => { localSourcesRef.current = localSources;  }, [localSources]);
-  useEffect(() => { onClickRef.current      = onArticleClick; }, [onArticleClick]);
+  useEffect(() => { articlesRef.current    = articles;         }, [articles]);
+  useEffect(() => { localSourcesRef.current = localSources;   }, [localSources]);
+  useEffect(() => { onCountryClickRef.current = onCountryClick; }, [onCountryClick]);
   useEffect(() => { onLocalClickRef.current = onLocalSourceClick; }, [onLocalSourceClick]);
   useEffect(() => { setDrawVersion(v => v + 1); }, [articles]);
 
@@ -174,8 +194,8 @@ export default function GlobeMap({
           const picked = viewer.scene.pick(click.position);
           if (picked?.id?.id) {
             const id = picked.id.id as string;
-            const article = entityMap.current.get(id);
-            if (article) { onClickRef.current(article); return; }
+            const country = countryMap.current.get(id);
+            if (country) { onCountryClickRef.current(country); return; }
             const sourceId = localSourceMap.current.get(id);
             if (sourceId) onLocalClickRef.current?.(sourceId);
           }
@@ -184,7 +204,7 @@ export default function GlobeMap({
       );
 
       viewerRef.current = viewer;
-      drawDots(Cesium, viewer);
+      drawMarkers(Cesium, viewer);
     };
 
     init().catch(console.error);
@@ -199,8 +219,8 @@ export default function GlobeMap({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Draw / redraw dots ───────────────────────────────────────────────────
-  const drawDots = useCallback(async (CesiumArg?: unknown, viewerArg?: unknown) => {
+  // ── Draw / redraw country beacons ────────────────────────────────────────
+  const drawMarkers = useCallback(async (CesiumArg?: unknown, viewerArg?: unknown) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const viewer: any = (viewerArg ?? viewerRef.current) as any;
     if (!viewer || viewer.isDestroyed()) return;
@@ -210,25 +230,49 @@ export default function GlobeMap({
     const C = Cesium as any;
 
     viewer.entities.removeAll();
-    entityMap.current.clear();
+    countryMap.current.clear();
     localSourceMap.current.clear();
 
-    // Article dots
+    // Group articles by country
+    const byCountry = new Map<string, NewsArticle[]>();
     for (const article of articlesRef.current) {
-      const hex   = CATEGORY_COLORS[article.category] ?? "#3b82f6";
-      const image = makeGlowDataUrl(hex);
+      const arr = byCountry.get(article.country) ?? [];
+      arr.push(article);
+      byCountry.set(article.country, arr);
+    }
+
+    // One donut beacon per country
+    for (const [country, countryArticles] of byCountry) {
+      const total = countryArticles.length;
+      const { lat, lon } = countryArticles[0];
+
+      // Tally articles per category
+      const catCounts = new Map<string, number>();
+      for (const a of countryArticles) {
+        catCounts.set(a.category, (catCounts.get(a.category) ?? 0) + 1);
+      }
+
+      const segments = Object.entries(CATEGORY_COLORS)
+        .map(([cat, color]) => ({ color, count: catCounts.get(cat) ?? 0 }))
+        .filter(s => s.count > 0);
+
+      const image = makeDonutDataUrl(segments, total);
+
+      // Billboard size scales logarithmically with article count (32–80 px)
+      const billboardSize = Math.min(80, 32 + 48 * (Math.log(total + 1) / Math.log(51)));
+
       const phase = Math.random() * Math.PI * 2;
-      const speed = 0.6 + Math.random() * 0.8;
+      const speed = 0.35 + Math.random() * 0.25;
 
       const entity = viewer.entities.add({
-        position: C.Cartesian3.fromDegrees(article.lon, article.lat),
+        position: C.Cartesian3.fromDegrees(lon, lat),
         billboard: {
           image,
-          width:  32,
-          height: 32,
+          width:  billboardSize,
+          height: billboardSize,
           scale: new C.CallbackProperty(() => {
             const t = Date.now() / 1000;
-            return 1.0 + 0.2 * Math.sin(t * speed + phase);
+            return 1.0 + 0.07 * Math.sin(t * speed + phase);
           }, false),
           verticalOrigin:   C.VerticalOrigin.CENTER,
           horizontalOrigin: C.HorizontalOrigin.CENTER,
@@ -236,10 +280,10 @@ export default function GlobeMap({
         },
       });
 
-      entityMap.current.set(entity.id, article);
+      countryMap.current.set(entity.id, country);
     }
 
-    // Local news source beacons — drawn on top with a stronger eyeOffset
+    // Local news source beacons
     for (const source of localSourcesRef.current) {
       const image = makeBeaconDataUrl(source.color);
       const phase = Math.random() * Math.PI * 2;
@@ -250,7 +294,6 @@ export default function GlobeMap({
           image,
           width:  48,
           height: 48,
-          // Slower, wider pulse to feel different from article dots
           scale: new C.CallbackProperty(() => {
             const t = Date.now() / 1000;
             return 1.0 + 0.15 * Math.sin(t * 0.8 + phase);
@@ -267,8 +310,8 @@ export default function GlobeMap({
 
   useEffect(() => {
     if (!viewerRef.current) return;
-    drawDots();
-  }, [drawVersion, drawDots]);
+    drawMarkers();
+  }, [drawVersion, drawMarkers]);
 
   // ── 2D / 3D toggle ───────────────────────────────────────────────────────
   const toggleMode = useCallback(() => {

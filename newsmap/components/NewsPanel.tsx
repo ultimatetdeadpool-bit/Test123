@@ -4,16 +4,7 @@ import { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import type { NewsArticle } from "@/lib/types";
-
-const CATEGORY_COLORS: Record<string, string> = {
-  conflict:    "#ef4444",
-  politics:    "#3b82f6",
-  economy:     "#f59e0b",
-  environment: "#22c55e",
-  health:      "#a855f7",
-  technology:  "#06b6d4",
-  general:     "#e2e8f0",
-};
+import { CATEGORY_COLORS } from "@/lib/category-colors";
 
 interface NewsPanelProps {
   articles: NewsArticle[];

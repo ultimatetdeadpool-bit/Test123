@@ -19,18 +19,18 @@ const REFRESH_INTERVAL = 5 * 60 * 1000;
 
 export default function Home() {
   const [articles,        setArticles]        = useState<NewsArticle[]>([]);
-  const [selected,        setSelected]        = useState<NewsArticle | null>(null);
+  const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
   const [lastUpdate,      setLastUpdate]      = useState<Date | null>(null);
   const [loading,         setLoading]         = useState(true);
   const [localArticles,   setLocalArticles]   = useState<Record<string, NewsArticle[]>>({});
   const [activeSourceId,  setActiveSourceId]  = useState<string | null>(null);
 
   const countryArticles = useMemo(() => {
-    if (!selected) return [];
+    if (!selectedCountry) return [];
     return articles
-      .filter(a => a.country === selected.country)
+      .filter(a => a.country === selectedCountry)
       .sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
-  }, [selected?.country, articles]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedCountry, articles]);
 
   const fetchNews = useCallback(async () => {
     try {
@@ -68,13 +68,13 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [fetchNews, fetchLocalNews]);
 
-  // Selecting an article clears any open local-source panel
+  // Selecting a country clears any open local-source panel
   useEffect(() => {
-    if (selected !== null) setActiveSourceId(null);
-  }, [selected]);
+    if (selectedCountry !== null) setActiveSourceId(null);
+  }, [selectedCountry]);
 
   const handleLocalSourceClick = useCallback((sourceId: string) => {
-    setSelected(null);
+    setSelectedCountry(null);
     setActiveSourceId(prev => (prev === sourceId ? null : sourceId));
   }, []);
 
@@ -82,7 +82,6 @@ export default function Home() {
   const panelArticles = activeSourceId
     ? (localArticles[activeSourceId] ?? [])
     : countryArticles;
-  const panelOpen = activeSourceId !== null || selected !== null;
 
   return (
     <main className="relative w-full h-screen bg-black overflow-hidden">
@@ -90,7 +89,7 @@ export default function Home() {
       <div className="absolute inset-0">
         <GlobeMap
           articles={articles}
-          onArticleClick={setSelected}
+          onCountryClick={setSelectedCountry}
           localSources={LOCAL_NEWS_SOURCES}
           onLocalSourceClick={handleLocalSourceClick}
         />
@@ -116,9 +115,9 @@ export default function Home() {
 
       <NewsPanel
         articles={panelArticles}
-        selectedId={selected?.id ?? null}
+        selectedId={null}
         onClose={() => {
-          setSelected(null);
+          setSelectedCountry(null);
           setActiveSourceId(null);
         }}
         title={activeSource ? activeSource.name : undefined}

@@ -4783,4 +4783,22 @@ export const districtRepresentativeData: Record<string, DistrictInfo> = {
   }
 };
 
+// Merge 2026 election results overlay into base data at module load time.
+// Populated by: node scripts/update-results.mjs --reps reps.csv
+import overlayRaw from "../../data/election-2026-results.json";
+type RepOverlay = { name: string; party: string; photoUrl: string };
+const repOverlay = (overlayRaw as unknown as {
+  representatives: Record<string, RepOverlay>;
+}).representatives;
+for (const [key, rep] of Object.entries(repOverlay)) {
+  const district = districtRepresentativeData[key];
+  if (!district) continue;
+  district.representative = {
+    ...district.representative,
+    name:     rep.name,
+    party:    rep.party as DistrictInfo["representative"]["party"],
+    photoUrl: rep.photoUrl || district.representative.photoUrl,
+  };
+}
+
 export default districtRepresentativeData;

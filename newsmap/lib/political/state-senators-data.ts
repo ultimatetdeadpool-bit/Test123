@@ -464,3 +464,19 @@ export const stateSenatorData: Record<string, StateInfo> = {
     ]
   }
 };
+
+// Merge 2026 election results overlay into base data at module load time.
+// Populated by: node scripts/update-results.mjs --senators senators.csv
+import overlayRaw from "../../data/election-2026-results.json";
+type SeatOverlay = { name: string; party: string; photoUrl: string };
+const senatorOverlay = (overlayRaw as unknown as {
+  senators: Record<string, Record<string, SeatOverlay>>;
+}).senators;
+for (const [fips, seats] of Object.entries(senatorOverlay)) {
+  const state = stateSenatorData[fips];
+  if (!state) continue;
+  for (const [idx, senator] of Object.entries(seats)) {
+    const i = Number(idx) as 0 | 1;
+    if (i === 0 || i === 1) state.senators[i] = senator;
+  }
+}
